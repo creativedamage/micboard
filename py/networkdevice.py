@@ -25,6 +25,12 @@ class ShureNetworkDevice:
         self.BASECONST = BASE_CONST[self.type]['base_const']
 
     def socket_connect(self):
+        if self.f is not None:
+            try:
+                self.f.close()
+            except OSError:
+                pass
+            self.f = None
         try:
             if BASE_CONST[self.type]['PROTOCOL'] == 'TCP':
                 self.f = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #TCP
@@ -40,14 +46,23 @@ class ShureNetworkDevice:
 
             for string in self.get_all():
                 self.writeQueue.put(string)
-        except socket.error as e:
+        except OSError as e:
+            logging.debug('connect to %s failed: %s', self.ip, e)
+            if self.f is not None:
+                self.f.close()
+                self.f = None
             self.set_rx_com_status('DISCONNECTED')
 
         self.socket_watchdog = int(time.perf_counter())
 
 
     def socket_disconnect(self):
-        self.f.close()
+        if self.f is not None:
+            try:
+                self.f.close()
+            except OSError:
+                pass
+            self.f = None
         self.set_rx_com_status('DISCONNECTED')
         self.socket_watchdog = int(time.perf_counter())
 
@@ -80,7 +95,8 @@ class ShureNetworkDevice:
             try:
                 if split[0] in ['REP', 'REPORT', 'SAMPLE'] and split[1] in ['1', '2', '3', '4']:
                     ch = self.get_device_by_channel(int(split[1]))
-                    ch.parse_raw_ch(data)
+                    if ch is not None:
+                        ch.parse_raw_ch(data)
 
                 elif split[0] in ['REP', 'REPORT']:
                     self.raw[split[1]] = ' '.join(split[2:])

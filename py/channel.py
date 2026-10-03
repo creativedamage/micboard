@@ -34,15 +34,19 @@ class ChannelDevice:
 
     def get_chan_name(self):
         name = self.chan_name_raw.split()
-        prefix = re.match("([A-Za-z]+)?([-]?)([0-9])+", name[0])
 
         chan_id = ''
         chan_name = ''
 
+        if not name:
+            return (chan_id, chan_name)
+
+        prefix = re.match("([A-Za-z]+)?([-]?)([0-9])+", name[0])
+
         if prefix:
             chan_id = name[0]
             chan_name = ' '.join(name[1:])
-        elif name[0] == 'IEM' and len(name[1]) == 1:
+        elif name[0] == 'IEM' and len(name) > 1 and len(name[1]) == 1:
             chan_id = ' '.join(name[:2])
             chan_name = ' '.join(name[2:])
         else:
@@ -63,16 +67,17 @@ class ChannelDevice:
                     self.cfg.pop('extended_id')
                 if 'extended_name' in self.cfg:
                     self.cfg.pop('extended_name')
-                self.cfg.pop('chan_name_raw')
+                self.cfg.pop('chan_name_raw', None)
                 config.save_current_config()
 
         return (chan_id, chan_name)
 
     def parse_raw_ch(self, data):
         split = data.split()
-        self.raw[split[2]] = ' '.join(split[3:])
 
         try:
+            self.raw[split[2]] = ' '.join(split[3:])
+
             if split[0] == 'SAMPLE' and split[2] == 'ALL':
                 self.parse_sample(split)
                 chart_update_list.append(self.chart_json())
@@ -84,5 +89,4 @@ class ChannelDevice:
                     data_update_list.append(self)
 
         except Exception as e:
-            print("Index Error(TX): {}".format(data.split()))
-            print(e)
+            logging.warning("Index Error(TX): %s (%s)", split, e)

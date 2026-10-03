@@ -7,30 +7,32 @@ The macOS app provides a great way to try Micboard before purchasing additional 
 Install git, python3-pip, and Node.js
 ```
 $ sudo apt-get update
-$ sudo apt-get install git python3-pip
-$ curl -sL https://deb.nodesource.com/setup_10.x | sudo -E bash -
+$ sudo apt-get install git python3-venv
+$ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 $ sudo apt-get install nodejs
 ```
 
 Download micboard
 ```
-$ git clone https://github.com/karlcswanson/micboard.git
+$ git clone https://github.com/creativedamage/micboard.git
 ```
 
-Install micboard software dependencies via npm and pip
+Install micboard software dependencies via npm and pip. Recent Debian, Ubuntu and
+Raspberry Pi OS releases block system-wide `pip install`, so use a virtual environment.
 ```
 $ cd micboard/
-$ npm install --only=prod
-$ pip3 install -r py/requirements.txt
+$ npm install
+$ python3 -m venv .venv
+$ .venv/bin/pip install -r py/requirements.txt
 ```
 
 build the micboard frontend and run micboard
 ```
 $ npm run build
-$ python3 py/micboard.py
+$ .venv/bin/python py/micboard.py
 ```
 
-Edit `User` and `WorkingDirectory` within `micboard.service` to match your installation and install it as a service.
+Edit `User` and `WorkingDirectory` within `micboard.service` to match your installation (the service runs `.venv/bin/python` from the working directory) and install it as a service.
 ```
 $ sudo cp micboard.service /etc/systemd/system/
 $ sudo systemctl start micboard.service
@@ -53,7 +55,7 @@ $ xcode-select --install
 
 Install the homebrew package manager
 ```
-$ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
 Install python3 and node
@@ -63,38 +65,34 @@ $ brew install python3 node
 
 Download Micboard
 ```
-$ git clone https://github.com/karlcswanson/micboard.git
+$ git clone https://github.com/creativedamage/micboard.git
 ```
 
 Install micboard software dependencies via npm and pip
 ```
 $ cd micboard/
-$ npm install --only=prod
-$ pip3 install -r py/requirements.txt
+$ npm install
+$ python3 -m venv .venv
+$ .venv/bin/pip install -r py/requirements.txt
 ```
 
 build the micboard frontend and run micboard
 ```
 $ npm run build
-$ python3 py/micboard.py
+$ .venv/bin/python py/micboard.py
 ```
 
 Check the [configuration](configuration.md) docs for more information on configuring micboard.
 
-Restart micboard
-```
-$ python3 py/micboard.py
-```
-
 ## Docker
 Download micboard from github
 ```
-$ git clone https://github.com/karlcswanson/micboard.git
+$ git clone https://github.com/creativedamage/micboard.git
 ```
 
-Build and run docker image
+Build and run the docker image. The compose file uses host networking so that
+device discovery (multicast) works; configuration is stored in `./config`.
 ```
 $ cd micboard/
-$ docker build -t micboard .
-$ docker-compose up
+$ docker compose up -d --build
 ```

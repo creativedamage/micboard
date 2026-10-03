@@ -58,7 +58,10 @@ def WirelessQueryQueue():
 def ProcessRXMessageQueue():
     while True:
         rx, msg = DeviceMessageQueue.get()
-        rx.parse_raw_rx(msg)
+        try:
+            rx.parse_raw_rx(msg)
+        except Exception:
+            logging.exception('Error parsing message from %s: %s', rx.ip, msg)
 
 
 def SocketService():
@@ -67,17 +70,34 @@ def SocketService():
 
     while True:
         watchdog_monitor()
-        readrx = [rx for rx in NetworkDevices if rx.rx_com_status in ['CONNECTING', 'CONNECTED']]
+        readrx = [rx for rx in NetworkDevices
+                  if rx.f is not None and rx.rx_com_status in ['CONNECTING', 'CONNECTED']]
         writerx = [rx for rx in readrx if not rx.writeQueue.empty()]
 
-        read_socks, write_socks, error_socks = select.select(readrx, writerx, readrx, .2)
+        if not readrx:
+            # select() on an empty list raises on Windows and busy-loops elsewhere
+            time.sleep(.2)
+            continue
+
+        try:
+            read_socks, write_socks, error_socks = select.select(readrx, writerx, readrx, .2)
+        except (OSError, ValueError):
+            # a socket was closed out from under us (e.g. during reconfig); retry
+            continue
 
         for rx in read_socks:
+            if rx.f is None:
+                continue
             try:
-                data = rx.f.recv(1024).decode('UTF-8')
-            except:
+                data = rx.f.recv(1024).decode('UTF-8', errors='ignore')
+            except OSError:
                 rx.socket_disconnect()
-                break
+                continue
+
+            if not data:
+                # TCP peer closed the connection
+                rx.socket_disconnect()
+                continue
             # print("read: {} data: {}".format(rx.ip,data))
 
             d = '>'
@@ -94,6 +114,8 @@ def SocketService():
 
 
         for rx in write_socks:
+            if rx.f is None or rx.writeQueue.empty():
+                continue
             string = rx.writeQueue.get()
             logging.debug("write: %s data: %s", rx.ip, string)
             try:
@@ -101,7 +123,7 @@ def SocketService():
                     rx.f.sendall(bytearray(string, 'UTF-8'))
                 elif rx.type == 'uhfr':
                     rx.f.sendto(bytearray(string, 'UTF-8'), (rx.ip, 2202))
-            except:
+            except OSError:
                 logging.warning("TX ERROR IP: %s String: %s", rx.ip, string)
 
 

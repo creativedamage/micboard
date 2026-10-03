@@ -4,7 +4,7 @@ import asyncio
 import socket
 import logging
 
-from tornado import websocket, web, ioloop, escape
+from tornado import websocket, web, ioloop
 
 import shure
 import config
@@ -15,23 +15,43 @@ import offline
 # https://stackoverflow.com/questions/5899497/checking-file-extension
 def file_list(extension):
     files = []
-    dir_list = os.listdir(config.gif_dir)
+    try:
+        dir_list = os.listdir(config.gif_dir)
+    except OSError:
+        return files
     # print(fileList)
     for file in dir_list:
         if file.lower().endswith(extension):
             files.append(file)
     return files
 
+def local_ip():
+    """Best-effort LAN IP of this host.
+
+    socket.gethostbyname(socket.gethostname()) returns 127.0.1.1 on most
+    Debian/Ubuntu/Raspberry Pi installs, which made the QR code useless.
+    Opening a UDP socket toward a non-routed address picks the outbound
+    interface without sending any packets.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        ip = s.getsockname()[0]
+    except OSError:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
+
+
 # Its not efficecent to get the IP each time, but for now we'll assume server might have dynamic IP
 def localURL():
     if 'local_url' in config.config_tree:
         return config.config_tree['local_url']
-    try:
-        ip = socket.gethostbyname(socket.gethostname())
-        return 'http://{}:{}'.format(ip, config.config_tree['port'])
-    except:
-        return 'https://micboard.io'
-    return 'https://micboard.io'
+    return 'http://{}:{}'.format(local_ip(), config.web_port())
 
 def micboard_json(network_devices):
     offline_devices = offline.offline_json()
@@ -79,19 +99,22 @@ class SocketHandler(websocket.WebSocketHandler):
         self.clients.add(self)
 
     def on_close(self):
-        self.clients.remove(self)
+        self.clients.discard(self)
 
     @classmethod
     def close_all_ws(cls):
-        for c in cls.clients:
+        # close() triggers on_close() which mutates the set, so iterate a copy
+        for c in list(cls.clients):
             c.close()
 
     @classmethod
     def broadcast(cls, data):
-        for c in cls.clients:
+        for c in list(cls.clients):
             try:
                 c.write_message(data)
-            except:
+            except websocket.WebSocketClosedError:
+                cls.clients.discard(c)
+            except Exception:
                 logging.warning("WS Error")
 
     @classmethod
@@ -115,40 +138,48 @@ class SocketHandler(websocket.WebSocketHandler):
         del shure.data_update_list[:]
         del config.group_update_list[:]
 
-class SlotHandler(web.RequestHandler):
+class JSONBodyHandler(web.RequestHandler):
+    def json_body(self):
+        try:
+            return json.loads(self.request.body)
+        except (ValueError, TypeError):
+            raise web.HTTPError(400, 'invalid JSON body')
+
+
+class SlotHandler(JSONBodyHandler):
     def get(self):
         self.write("hi - slot")
 
     def post(self):
-        data = json.loads(self.request.body)
+        data = self.json_body()
         self.write('{}')
         for slot_update in data:
             config.update_slot(slot_update)
-            print(slot_update)
+            logging.info('slot update: %s', slot_update)
 
-class ConfigHandler(web.RequestHandler):
+class ConfigHandler(JSONBodyHandler):
     def get(self):
         self.write("hi - slot")
 
     def post(self):
-        data = json.loads(self.request.body)
-        print(data)
+        data = self.json_body()
+        logging.info('config update: %s', data)
         self.write('{}')
         config.reconfig(data)
 
-class GroupUpdateHandler(web.RequestHandler):
+class GroupUpdateHandler(JSONBodyHandler):
     def get(self):
         self.write("hi - group")
 
     def post(self):
-        data = json.loads(self.request.body)
+        data = self.json_body()
         config.update_group(data)
-        print(data)
+        logging.info('group update: %s', data)
         self.write(data)
 
 class MicboardReloadConfigHandler(web.RequestHandler):
     def post(self):
-        print("RECONFIG")
+        logging.info("RECONFIG")
         config.reconfig()
         self.write("restarting")
 
@@ -174,8 +205,11 @@ def twisted():
         (r'/static/(.*)', web.StaticFileHandler, {'path': config.app_dir('static')}),
         (r'/bg/(.*)', NoCacheHandler, {'path': config.get_gif_dir()})
     ])
+    # Tornado runs in a worker thread, which has no asyncio loop by default
     # https://github.com/tornadoweb/tornado/issues/2308
     asyncio.set_event_loop(asyncio.new_event_loop())
+    loop = ioloop.IOLoop.current()
     app.listen(config.web_port())
+    logging.info('Micboard listening on %s', localURL())
     ioloop.PeriodicCallback(SocketHandler.ws_dump, 50).start()
-    ioloop.IOLoop.instance().start()
+    loop.start()

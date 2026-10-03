@@ -2,6 +2,7 @@ import socket
 import struct
 import json
 import time
+import logging
 
 import os
 import platform
@@ -27,26 +28,50 @@ discovered = []
 # https://stackoverflow.com/questions/603852/multicast-in-python
 def discover():
     dcid_restore_from_file(config.app_dir('dcid.json'))
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1) #mac fix
-    sock.bind((MCAST_GRP, MCAST_PORT))  # use MCAST_GRP instead of '' to listen only
-                                 # to MCAST_GRP, not all groups on MCAST_PORT
-    mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
+    try:
+        sock = discovery_socket()
+    except OSError as e:
+        # Discovery is a convenience; don't take the server down if the
+        # multicast port is busy (e.g. Wireless Workbench running) or blocked.
+        logging.warning('Shure device discovery disabled: %s', e)
+        return
 
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     while True:
         data, (ip, _) = sock.recvfrom(1024)
         data = data.decode('UTF-8', errors="ignore")
         try:
             process_discovery_packet(ip, data)
-        except:
+        except Exception:
             pass
+
+
+def discovery_socket():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, 'SO_REUSEPORT'):  # not available on Windows
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)  # mac fix
+        except OSError:
+            pass
+
+    # Binding to the group address filters to MCAST_GRP on Linux/macOS but is
+    # not allowed on Windows, which needs the wildcard address.
+    try:
+        sock.bind((MCAST_GRP, MCAST_PORT))
+    except OSError:
+        sock.bind(('', MCAST_PORT))
+
+    mreq = struct.pack("4s4s", socket.inet_aton(MCAST_GRP), socket.inet_aton('0.0.0.0'))
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    return sock
 
 def process_discovery_packet(ip, data):
     dcid = dcid_find(data)
     device = dcid_get(dcid)
-    rx_type, channels = dcid_model_lookup(device['model'])
+    model = dcid_model_lookup(device['model'])
+    if model is None:
+        return
+    rx_type, channels = model
     if __name__ == '__main__':
         print('RX: {} at: {} DCID: {} BAND: {} CHANNELS: {}'.format(rx_type, ip, dcid, device['band'], channels))
 
@@ -95,7 +120,7 @@ def add_rx_to_dlist(ip, rx_type, channels):
 
 def time_filterd_discovered_list():
     out = []
-    for i in discovered:
+    for i in list(discovered):
         if (time.time() - i['timestamp']) < 30:
             out.append(i)
     return out

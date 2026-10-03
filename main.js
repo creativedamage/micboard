@@ -35,7 +35,7 @@ function openConfigFolder(file) {
 
 function openLogFile() {
   const file = path.join(app.getPath('appData'), 'micboard', 'micboard.log');
-  shell.openItem(file);
+  shell.openPath(file);
 }
 
 

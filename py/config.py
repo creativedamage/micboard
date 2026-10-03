@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+import logging.handlers
 import argparse
 import uuid
 import time
@@ -38,6 +39,11 @@ def logging_init():
     log = logging.getLogger()
     log.setLevel(logging.DEBUG)
 
+    # reconfig() calls config() again; don't stack duplicate handlers
+    for handler in list(log.handlers):
+        log.removeHandler(handler)
+        handler.close()
+
     sthandler = logging.StreamHandler(sys.stdout)
     fhandler = logging.handlers.RotatingFileHandler(log_file(),
                                                     maxBytes=10*1024*1024,
@@ -51,7 +57,7 @@ def logging_init():
 
 
 def web_port():
-    if args['server_port'] is not None:
+    if args.get('server_port') is not None:
         return int(args['server_port'])
 
     elif 'MICBOARD_PORT' in os.environ:
@@ -72,7 +78,7 @@ def os_config_path():
 
 
 def config_path(folder=None):
-    if args['config_path'] is not None:
+    if args.get('config_path') is not None:
         if os.path.exists(os.path.expanduser(args['config_path'])):
             path = os.path.expanduser(args['config_path'])
         else:
@@ -81,8 +87,7 @@ def config_path(folder=None):
 
     else:
         path = os.path.join(os_config_path(), APPNAME)
-        if not os.path.exists(path):
-            os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
 
     if folder:
         return os.path.join(path, folder)
@@ -105,13 +110,11 @@ def app_dir(folder=None):
 
 def default_gif_dir():
     path = config_path('backgrounds')
-    if not os.path.exists(path):
-        os.makedirs(path)
-    print("GIFCHECK!")
+    os.makedirs(path, exist_ok=True)
     return path
 
 def get_gif_dir():
-    if args['background_directory'] is not None:
+    if args.get('background_directory') is not None:
         if os.path.exists(os.path.expanduser(args['background_directory'])):
             return os.path.expanduser(args['background_directory'])
         else:
@@ -184,6 +187,8 @@ def read_json_config(file):
     with open(file) as config_file:
         config_tree = json.load(config_file)
 
+        config_tree.setdefault('slots', [])
+        config_tree.setdefault('groups', [])
         for chan in config_tree['slots']:
             if chan['type'] in ['uhfr', 'qlxd', 'ulxd', 'axtd', 'p10t']:
                 netDev = shure.check_add_network_device(chan['ip'], chan['type'])
@@ -197,8 +202,11 @@ def read_json_config(file):
     config_tree['micboard_version'] = get_version_number()
 
 def write_json_config(data):
-    with open(config_file(), 'w') as f:
+    path = config_file()
+    tmp_path = path + '.tmp'
+    with open(tmp_path, 'w') as f:
         json.dump(data, f, indent=2, separators=(',', ': '), sort_keys=True)
+    os.replace(tmp_path, path)
 
 def save_current_config():
     return write_json_config(config_tree)
@@ -211,6 +219,7 @@ def get_group_by_number(group_number):
 
 def update_group(data):
     group_update_list.append(data)
+    config_tree.setdefault('groups', [])
     group = get_group_by_number(data['group'])
     if not group:
         group = {}
@@ -219,18 +228,21 @@ def update_group(data):
 
     group['slots'] = data['slots']
     group['title'] = data['title']
-    group['hide_charts'] = data['hide_charts']
+    group['hide_charts'] = data.get('hide_charts', False)
 
     save_current_config()
 
 def get_slot_by_number(slot_number):
     for slot in config_tree['slots']:
-        if slot['slot'] == slot_number:
+        if int(slot['slot']) == int(slot_number):
             return slot
     return None
 
 def update_slot(data):
     slot_cfg = get_slot_by_number(data['slot'])
+    if slot_cfg is None:
+        logging.warning('update_slot: unknown slot %s', data.get('slot'))
+        return
     save_name = False
 
     if data.get('extended_id'):

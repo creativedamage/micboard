@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.9.0] - 2026-10-03
+Community modernization fork of karlcswanson/micboard. See README "What changed in this fork".
+### Changed
+- Frontend toolchain: webpack 5, Dart Sass, Babel 7 latest; Node 18+ supported.
+- Dockerfile: multi-stage Node 20 / Python 3.12 build; compose uses host networking.
+- Docs updated for current Debian/Ubuntu/Raspberry Pi OS and macOS.
+### Fixed
+- Server shutdown, port-in-use handling, LAN IP detection for QR code.
+- Discovery on Windows / busy multicast port.
+- Several crashes in receiver socket handling, channel-name parsing and WebSocket broadcast.
+
+
 ## [0.8.5] - 2019-10-10
 ### Added
 - Device configuration page.
